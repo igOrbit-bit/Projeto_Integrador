@@ -1,19 +1,18 @@
-import { useState } from "react";
-import Login from "./Login";
-import Cadastro from "./Cadastro";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import Home from "./pages/Home";
 import "./App.css";
 
 function App() {
-  const [tela, setTela] = useState("login");
-
   return (
-    <div className="container">
-      {tela === "login" ? (
-        <Login mudarTela={setTela} />
-      ) : (
-        <Cadastro mudarTela={setTela} />
-      )}
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/home" element={<Home />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 
