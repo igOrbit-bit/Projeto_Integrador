@@ -1,14 +1,43 @@
-import { useContext } from "react";
-import { AuthContext } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom"
+import "./Home.css"
 
-export default function Home() {
-  const { user, logout } = useContext(AuthContext);
+export default function Home(){
 
-  return (
-    <div>
-      <h1>Bem-vindo, {user?.name}</h1>
-      <p>Email: {user?.email}</p>
-      <button onClick={logout}>Sair</button>
+  const navigate = useNavigate()
+
+  const voltarLogin = () =>{
+    navigate("/login")
+  }
+
+  return(
+
+    <div className="home-container">
+
+      <div className="home-card">
+
+        <h1>Visible Speech</h1>
+
+      
+
+        <input
+          type="text"
+          placeholder="Digite aqui..."
+        />
+
+        <button className="send-btn">
+          Enviar
+        </button>
+
+        <button
+          className="back-btn"
+          onClick={voltarLogin}
+        >
+          Voltar
+        </button>
+
+      </div>
+
     </div>
-  );
+
+  )
 }

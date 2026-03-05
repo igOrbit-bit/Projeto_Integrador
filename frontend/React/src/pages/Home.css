@@ -1,4 +1,4 @@
-.register-container{
+.home-container{
 
   height:100vh;
   display:flex;
@@ -8,7 +8,7 @@
 
 }
 
-.register-card{
+.home-card{
 
   width:350px;
   padding:40px;
@@ -19,49 +19,64 @@
 
 }
 
-.register-card h2{
+.home-card h1{
 
   margin-bottom:20px;
+  color:#333;
 
 }
 
-.register-card input{
+.home-card p{
+
+  margin-bottom:20px;
+  color:#666;
+
+}
+
+.home-card input{
 
   width:100%;
   padding:12px;
-  margin-bottom:12px;
   border-radius:6px;
   border:1px solid #ccc;
+  margin-bottom:15px;
+  font-size:14px;
 
 }
 
-.register-card button{
+.send-btn{
 
   width:100%;
   padding:12px;
-  background:#4f46e5;
   border:none;
   border-radius:6px;
+  background:#4f46e5;
   color:white;
+  font-size:15px;
   cursor:pointer;
+  margin-bottom:10px;
 
 }
 
-.register-card button:hover{
+.send-btn:hover{
 
   background:#4338ca;
 
 }
 
-.register-card p{
+.back-btn{
 
-  margin-top:15px;
+  width:100%;
+  padding:10px;
+  border:none;
+  border-radius:6px;
+  background:#4338ca;
+  cursor:pointer;
+
 }
 
-.register-card a{
+.back-btn:hover{
 
-  color:#4f46e5;
-  text-decoration:none;
-  font-weight:bold;
+  background:#4338ca;
 
 }
