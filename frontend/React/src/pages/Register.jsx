@@ -9,6 +9,7 @@ export default function Register() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
+  const [loading, setLoading] = useState(false)
 
   const navigate = useNavigate()
 
@@ -21,18 +22,27 @@ export default function Register() {
       return
     }
 
+    setLoading(true)
+
     try {
 
-      await registerUser(name, email, password)
+      await registerUser(name, email, password, confirmPassword)
 
       alert("Cadastro realizado!")
 
-      navigate("/login") // 👈 VAI PARA LOGIN
+      navigate("/login")
 
     } catch (error) {
-      console.error(error);
-      alert("Erro ao registrar");
+
+      console.error(error)
+      alert("Erro ao registrar")
+
+    } finally {
+
+      setLoading(false)
+
     }
+
   }
 
   return (
@@ -76,9 +86,15 @@ export default function Register() {
             required
           />
 
-          <button type="submit">Cadastrar</button>
+          <button type="submit" disabled={loading}>
+
+            {loading ? "Cadastrando..." : "Cadastrar"}
+
+          </button>
 
         </form>
+
+        {loading && <p className="loading-text">Criando conta...</p>}
 
         <p>
           Já tem conta? <Link to="/login">Entrar</Link>

@@ -19,7 +19,7 @@ body {
   border-radius: 10px;
   box-shadow: 0 10px 25px rgba(0,0,0,0.2);
   text-align: center;
-}
+} 
 
 .login-card h2 {
   margin-bottom: 25px;
@@ -74,3 +74,4 @@ body {
 .login-card a:hover {
   text-decoration: underline;
 }
+

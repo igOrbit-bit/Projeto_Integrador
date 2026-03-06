@@ -1,15 +1,13 @@
-import { useState, useContext } from "react"
+import { useState } from "react"  
 import { useNavigate, Link } from "react-router-dom"
 import { loginUser } from "../services/api"
-import { AuthContext } from "../context/AuthContext"
 import "./Login.css"
 
 export default function Login() {
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-
-  const { login } = useContext(AuthContext)
+  const [loading, setLoading] = useState(false)
 
   const navigate = useNavigate()
 
@@ -17,55 +15,73 @@ export default function Login() {
 
     e.preventDefault()
 
+    setLoading(true)
+
     try {
 
-      const response = await loginUser(email, password)
+      const data = await loginUser(email, password)
 
-      login(response)
+      console.log("Login realizado:", data)
 
-      navigate("/home") // 👈 VAI PARA HOME
+      alert("Login realizado!")
+
+      // redireciona para HOME
+      navigate("/home")
 
     } catch (error) {
-      console.error(error);
-      alert("Erro ao registrar");
+
+      console.error(error)
+      alert("Email ou senha inválidos")
+
+    } finally {
+
+      setLoading(false)
 
     }
 
   }
 
   return (
+
     <div className="login-container">
 
       <div className="login-card">
 
-        <h2>Login</h2>
+        <h2>Entrar</h2>
 
         <form onSubmit={handleSubmit}>
 
           <input
             type="email"
-            placeholder="Digite seu email"
+            placeholder="Email"
             value={email}
             onChange={(e)=>setEmail(e.target.value)}
+            required
           />
 
           <input
             type="password"
-            placeholder="Digite sua senha"
+            placeholder="Senha"
             value={password}
             onChange={(e)=>setPassword(e.target.value)}
+            required
           />
 
-          <button type="submit">Entrar</button>
+          <button type="submit" disabled={loading}>
+
+            {loading ? "Entrando..." : "Entrar"}
+
+          </button>
 
         </form>
 
         <p>
-          Não tem cadastro? <Link to="/register">Criar conta</Link>
+          Não tem conta? <Link to="/register">Criar conta</Link>
         </p>
 
       </div>
 
     </div>
+
   )
 }
