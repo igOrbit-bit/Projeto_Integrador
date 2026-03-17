@@ -1,83 +1,214 @@
-.register-container{
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
 
-  height:100vh;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
+.register-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: #f5f0e8;
+  background-image:
+    radial-gradient(ellipse 60% 40% at 20% 20%, rgba(99,102,241,0.1) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 40% at 80% 80%, rgba(251,146,60,0.1) 0%, transparent 60%);
+  font-family: 'Nunito', sans-serif;
 }
 
-.register-card{
-
-  width:350px;
-  padding:40px;
-  background:white;
-  border-radius:10px;
-  box-shadow:0 10px 25px rgba(0,0,0,0.1);
-  text-align:center;
-
+.register-card {
+  background: white;
+  padding: 44px 40px 40px;
+  width: 100%;
+  max-width: 420px;
+  border-radius: 28px;
+  box-shadow: 0 6px 0px #d6cfc4, 0 20px 48px rgba(0,0,0,0.1);
+  text-align: center;
+  animation: fadeUp 0.5s cubic-bezier(0.22,1,0.36,1) both;
 }
 
-.register-card h2{
-
-  margin-bottom:20px;
-
+.register-logo {
+  width: 52px;
+  height: 52px;
+  background: linear-gradient(135deg, #6366f1, #a78bfa);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  margin: 0 auto 18px;
+  box-shadow: 0 4px 12px rgba(99,102,241,0.35);
 }
 
-.register-card input{
-
-  width:100%;
-  padding:12px;
-  margin-bottom:12px;
-  border-radius:6px;
-  border:1px solid #ccc;
-
-
+.register-card h2 {
+  margin: 0 0 6px;
+  font-size: 1.75rem;
+  font-weight: 900;
+  color: #1e1a14;
+  letter-spacing: -0.02em;
 }
 
+.register-subtitle {
+  font-size: 0.88rem;
+  color: #8b7355;
+  margin: 0 0 28px;
+  font-weight: 600;
+}
 
-.register-card input:focus{
+/* ── Input group ────────────────────────────────────── */
+.input-group {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.input-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1rem;
+  pointer-events: none;
+  line-height: 1;
+}
+
+.input-group input {
+  width: 100%;
+  padding: 14px 48px 14px 44px;
+  border-radius: 14px;
+  border: 2px solid #e5ddd0;
+  background: #faf8f4;
+  color: #1e1a14;
+  font-size: 15px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 600;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.input-group input::placeholder { color: #b8a898; }
+
+.input-group input:focus {
   outline: none;
-  border:1px solid #4f46e5;
-  box-shadow:0 0 4px rgba(79,70,229,0.3);
+  border-color: #6366f1;
+  background: white;
+  box-shadow: 0 0 0 4px rgba(99,102,241,0.12);
 }
 
-
-  .register-card button{
-
-    width:100%;
-    padding:12px;
-    background:#4f46e5;
-    border:none;
-    border-radius:6px;
-    color:white;
-    cursor:pointer;
-
-  }
-
-.register-card button:hover{
-
-  background:#4338ca;
-
+/* ── Eye button ─────────────────────────────────────── */
+.eye-btn {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: #b8a898;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: color 0.2s;
+  width: auto;
+  box-shadow: none;
 }
 
-.register-card p{
-
-  margin-top:15px;
+.eye-btn:hover {
+  color: #6366f1;
+  transform: translateY(-50%);
+  box-shadow: none;
 }
 
-.register-card a{
-
-  color:#4f46e5;
-  text-decoration:none;
-  font-weight:bold;
-
+/* ── Submit button ──────────────────────────────────── */
+.register-card button[type="submit"] {
+  width: 100%;
+  padding: 15px;
+  margin-top: 8px;
+  background: linear-gradient(135deg, #6366f1, #818cf8);
+  border: none;
+  border-radius: 14px;
+  color: white;
+  font-size: 16px;
+  font-weight: 800;
+  font-family: 'Nunito', sans-serif;
+  cursor: pointer;
+  box-shadow: 0 4px 0px #4338ca;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s;
+  letter-spacing: 0.01em;
 }
 
+.register-card button[type="submit"]:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 0px #4338ca;
+}
 
-.loading-text{
-  margin-top:10px;
-  color:#666;
-  font-size:14px;
+.register-card button[type="submit"]:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0px #4338ca;
+}
+
+.register-card button[type="submit"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: 0 4px 0px #4338ca;
+}
+
+.register-footer-text {
+  margin-top: 24px;
+  font-size: 0.88rem;
+  color: #8b7355;
+  font-weight: 600;
+}
+
+.register-footer-text a {
+  color: #6366f1;
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.register-footer-text a:hover { text-decoration: underline; }
+
+/* ── Toast ──────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  top: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-80px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px;
+  border-radius: 16px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  font-family: 'Nunito', sans-serif;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  opacity: 0;
+  transition: transform 0.35s cubic-bezier(0.22,1,0.36,1), opacity 0.35s ease;
+  z-index: 999;
+  white-space: nowrap;
+}
+
+.toast-show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+.toast-success {
+  background: #dcfce7;
+  border: 2px solid #86efac;
+  color: #14532d;
+}
+
+.toast-error {
+  background: #fee2e2;
+  border: 2px solid #fca5a5;
+  color: #7f1d1d;
+}
+
+.toast-icon { font-size: 1.1rem; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
