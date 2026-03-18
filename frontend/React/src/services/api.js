@@ -1,4 +1,4 @@
-const BASE_URL = "https://libras-api.fly.dev/api/v1";
+const BASE_URL = 'https://libras-api-rough-rain-8952.fly.dev/api/v1';
 
 export const registerUser = async (name, email, password, passwordConfirmation) => {
 
