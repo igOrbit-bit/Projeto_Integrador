@@ -1,177 +1,241 @@
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&display=swap');
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-  font-family: 'Nunito', sans-serif;
-  background: #f5f0e8;
+* { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0; 
 }
 
+body {
+  font-family: 'Noto Sans', 'Segoe UI', sans-serif;
+  background: #5865f2;
+}
+
+/* ── Login Container ────────────────────────────────── */
 .login-container {
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
   padding: 24px;
-  background: #f5f0e8;
-  background-image:
-    radial-gradient(ellipse 60% 40% at 20% 20%, rgba(99,102,241,0.1) 0%, transparent 60%),
-    radial-gradient(ellipse 50% 40% at 80% 80%, rgba(251,146,60,0.1) 0%, transparent 60%);
-  font-family: 'Nunito', sans-serif;
+  background: linear-gradient(135deg, #5865f2 0%, #3b4cca 100%);
+  font-family: 'Noto Sans', 'Segoe UI', sans-serif;
+  position: relative;
+  overflow: hidden;
 }
 
+/* Elementos decorativos de fundo (estilo Discord) */
+.login-container::before {
+  content: '';
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 50%;
+  top: -250px;
+  right: -100px;
+}
+
+.login-container::after {
+  content: '';
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 50%;
+  bottom: -200px;
+  left: -100px;
+}
+
+/* ── Login Card ─────────────────────────────────────── */
 .login-card {
-  background: white;
-  padding: 44px 40px 40px;
+  background: #35363f;
+  padding: 32px;
   width: 100%;
-  max-width: 420px;
-  border-radius: 28px;
-  box-shadow: 0 6px 0px #d6cfc4, 0 20px 48px rgba(0,0,0,0.1);
+  max-width: 480px;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   text-align: center;
-  animation: fadeUp 0.5s cubic-bezier(0.22,1,0.36,1) both;
+  animation: fadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  position: relative;
+  z-index: 1;
 }
 
+/* ── Logo ───────────────────────────────────────────── */
 .login-logo {
-  width: 52px;
-  height: 52px;
-  background: linear-gradient(135deg, #6366f1, #a78bfa);
-  border-radius: 16px;
+  width: 60 px;
+  height: 60px;
+  background: transparent;
+  border-radius: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1.4rem;
   margin: 0 auto 18px;
-  box-shadow: 0 4px 12px rgba(99,102,241,0.35);
+  box-shadow: none;
+  color: #5865f2;
 }
 
 .login-card h2 {
-  margin: 0 0 6px;
-  font-size: 1.75rem;
-  font-weight: 900;
-  color: #1e1a14;
+  margin: 0 0 8px;
+  font-size: 24px;
+  font-weight: 600;
+  color: #ffffff;
   letter-spacing: -0.02em;
+  text-align: center;
 }
 
 .login-subtitle {
-  font-size: 0.88rem;
-  color: #8b7355;
-  margin: 0 0 28px;
-  font-weight: 600;
+  font-size: 16px;
+  color: #b9bbbe;
+  margin: 0 0 20px;
+  font-weight: 400;
+  text-align: center;
 }
 
-/* ── Input group ────────────────────────────────────── */
+/* ── Input Group ────────────────────────────────────── */
 .input-group {
   position: relative;
-  margin-bottom: 12px;
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+.input-group label {
+  display: block;
+  color: #b9bbbe;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
 }
 
 .input-icon {
-  position: absolute;
-  left: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 1rem;
-  pointer-events: none;
-  line-height: 1;
+  display: none; /* Discord não usa ícones dentro dos inputs */
 }
 
 .input-group input {
   width: 100%;
-  padding: 14px 48px 14px 44px;
-  border-radius: 14px;
-  border: 2px solid #e5ddd0;
-  background: #faf8f4;
-  color: #1e1a14;
-  font-size: 15px;
-  font-family: 'Nunito', sans-serif;
-  font-weight: 600;
+  padding: 10px;
+  border-radius: 4px;
+  border: 1px solid #202225;
+  background: #202225;
+  color: #dcddde;
+  font-size: 16px;
+  font-family: 'Noto Sans', 'Segoe UI', sans-serif;
+  font-weight: 400;
   transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
 }
 
-.input-group input::placeholder { color: #b8a898; }
+.input-group input::placeholder { 
+  color: #72767d;
+  font-weight: 400;
+}
 
 .input-group input:focus {
   outline: none;
-  border-color: #6366f1;
-  background: white;
-  box-shadow: 0 0 0 4px rgba(99,102,241,0.12);
+  border-color: #5865f2;
+  background: #202225;
+  box-shadow: none;
 }
 
-/* ── Eye button ─────────────────────────────────────── */
+/* ── Eye Button ─────────────────────────────────────── */
 .eye-btn {
   position: absolute;
-  right: 14px;
-  top: 50%;
-  transform: translateY(-50%);
+  right: 10px;
+  top: 38px;
   background: none;
   border: none;
   cursor: pointer;
   padding: 4px;
-  color: #b8a898;
+  color: #b9bbbe;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: 4px;
   transition: color 0.2s;
   width: auto;
   box-shadow: none;
 }
 
 .eye-btn:hover {
-  color: #6366f1;
-  transform: translateY(-50%);
+  color: #dcddde;
+  transform: none;
   box-shadow: none;
 }
 
-/* ── Submit button ──────────────────────────────────── */
+/* ── Forgot Link ────────────────────────────────────── */
+.forgot-link {
+  display: block;
+  margin-top: 4px;
+  color: #00aff4;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 400;
+  transition: opacity 0.2s;
+}
+
+.forgot-link:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+/* ── Submit Button ──────────────────────────────────── */
 .login-card button[type="submit"] {
   width: 100%;
-  padding: 15px;
-  margin-top: 8px;
-  background: linear-gradient(135deg, #6366f1, #818cf8);
-  color: white;
+  padding: 12px;
+  margin-top: 20px;
+  background: #5865f2;
+  color: #ffffff;
   border: none;
-  border-radius: 14px;
+  border-radius: 4px;
   font-size: 16px;
-  font-weight: 800;
-  font-family: 'Nunito', sans-serif;
+  font-weight: 500;
+  font-family: 'Noto Sans', 'Segoe UI', sans-serif;
   cursor: pointer;
-  box-shadow: 0 4px 0px #4338ca;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-  letter-spacing: 0.01em;
+  box-shadow: none;
+  transition: background-color 0.2s ease;
+  letter-spacing: 0;
 }
 
 .login-card button[type="submit"]:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 0px #4338ca;
+  background: #4752c4;
+  transform: none;
+  box-shadow: none;
 }
 
 .login-card button[type="submit"]:active {
-  transform: translateY(2px);
-  box-shadow: 0 2px 0px #4338ca;
+  background: #3c45a5;
+  transform: none;
+  box-shadow: none;
 }
 
 .login-card button[type="submit"]:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
   transform: none;
-  box-shadow: 0 4px 0px #4338ca;
+  box-shadow: none;
+  background: #5865f2;
 }
 
+/* ── Footer Text ────────────────────────────────────── */
 .login-footer-text {
-  margin-top: 24px;
-  font-size: 0.88rem;
-  color: #8b7355;
-  font-weight: 600;
+  margin-top: 8px;
+  font-size: 14px;
+  color: #b9bbbe;
+  font-weight: 400;
 }
 
 .login-footer-text a {
-  color: #6366f1;
-  font-weight: 800;
+  color: #00aff4;
+  font-weight: 400;
   text-decoration: none;
 }
 
-.login-footer-text a:hover { text-decoration: underline; }
+.login-footer-text a:hover { 
+  text-decoration: underline;
+  opacity: 0.8;
+}
 
 /* ── Toast ──────────────────────────────────────────── */
 .toast {
@@ -183,13 +247,13 @@ body {
   align-items: center;
   gap: 10px;
   padding: 14px 24px;
-  border-radius: 16px;
-  font-size: 0.92rem;
-  font-weight: 700;
-  font-family: 'Nunito', sans-serif;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: 'Noto Sans', 'Segoe UI', sans-serif;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   opacity: 0;
-  transition: transform 0.35s cubic-bezier(0.22,1,0.36,1), opacity 0.35s ease;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s ease;
   z-index: 999;
   white-space: nowrap;
 }
@@ -200,20 +264,39 @@ body {
 }
 
 .toast-success {
-  background: #dcfce7;
-  border: 2px solid #86efac;
-  color: #14532d;
+  background: #3ba55d;
+  border: none;
+  color: #ffffff;
 }
 
 .toast-error {
-  background: #fee2e2;
-  border: 2px solid #fca5a5;
-  color: #7f1d1d;
+  background: #ed4245;
+  border: none;
+  color: #ffffff;
 }
 
-.toast-icon { font-size: 1.1rem; }
+.toast-icon { 
+  font-size: 1rem;
+  font-weight: 700;
+}
 
+/* ── Animation ──────────────────────────────────────── */
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(24px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── Responsive ─────────────────────────────────────── */
+@media (max-width: 480px) {
+  .login-card {
+    padding: 24px;
+  }
+
+  .login-card h2 {
+    font-size: 20px;
+  }
+
+  .login-subtitle {
+    font-size: 14px;
+  }
+} 
