@@ -19,6 +19,7 @@ import echo from "../echo";
 
 const LIVEKIT_URL = "wss://libras-2iiad817.livekit.cloud";
 const CHAT_TOPIC = "chat-message";
+const TRANSCRIPTION_FALLBACK_EVENT = "transcription:received";
 
 const SILENCE_THRESHOLD = 0.006;
 const SILENCE_DURATION  = 600;
@@ -26,6 +27,14 @@ const MAX_DURATION      = 4000;
 const MIN_BLOB_BYTES    = 800;
 
 const API_URL = import.meta.env.VITE_API_URL;
+
+function appendUniqueMessage(previousMessages, nextMessage) {
+  if (nextMessage?.serverId && previousMessages.some((message) => message.serverId === nextMessage.serverId)) {
+    return previousMessages;
+  }
+
+  return [...previousMessages, nextMessage];
+}
 
 function authHeaders() {
   return { Authorization: `Bearer ${localStorage.getItem("authToken")}` };
@@ -53,10 +62,12 @@ async function sendAudio(blob, mimeType, participantName, roomCode) {
   const ext = mimeType.includes("ogg") ? "ogg" : "webm";
   const buffer = await blob.arrayBuffer();
   const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
-  await axios.post(`${API_URL}/api/v1/transcribe`,
+  const response = await axios.post(`${API_URL}/api/v1/transcribe`,
     { audio: base64, audio_ext: ext, participant_name: participantName, room_code: roomCode },
     { headers: authHeaders() }
   );
+
+  return response.data;
 }
 
 /* ================= Transcrição com detecção de silêncio ================= */
@@ -95,7 +106,13 @@ function AudioTranscriber({ roomCode, userName, onSpeakingChange }) {
         onSpeakingChange?.(false);
         if (!active) return;
         const blob = new Blob(chunks, { type: mimeType });
-        await sendAudio(blob, mimeType, getName(), roomCode);
+        const response = await sendAudio(blob, mimeType, getName(), roomCode);
+
+        if (response?.persisted && response.message) {
+          window.dispatchEvent(new CustomEvent(TRANSCRIPTION_FALLBACK_EVENT, {
+            detail: response.message,
+          }));
+        }
       };
       mediaRecorder.start();
       maxTimer = setTimeout(() => { if (isRecording) flush(); }, MAX_DURATION);
@@ -261,16 +278,40 @@ function UnifiedChat({ roomCode, userName, onClose, isMobile, ttsSettings, onUnr
   useEffect(() => {
     const channel = echo.channel(`room.${roomCode}`);
     channel.listen(".transcription.received", (e) => {
-      setMessages((prev) => [...prev, {
-        id: Date.now() + Math.random(), name: e.participantName, text: e.transcript,
+      setMessages((prev) => appendUniqueMessage(prev, {
+        id: `srv-${e.id}`, serverId: e.id, name: e.participantName, text: e.transcript,
         type: "transcription",
-        time: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        time: e.time || new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
         isLocal: false,
-      }]);
+      }));
       onUnread?.();
     });
     return () => echo.leaveChannel(`room.${roomCode}`);
-  }, [roomCode]);
+  }, [roomCode, onUnread]);
+
+  useEffect(() => {
+    const handleFallback = (event) => {
+      const payload = event.detail;
+
+      if (!payload || payload.roomCode !== roomCode) {
+        return;
+      }
+
+      setMessages((prev) => appendUniqueMessage(prev, {
+        id: `srv-${payload.id}`,
+        serverId: payload.id,
+        name: payload.participantName,
+        text: payload.transcript,
+        type: "transcription",
+        time: payload.time,
+        isLocal: payload.participantName === displayName,
+      }));
+    };
+
+    window.addEventListener(TRANSCRIPTION_FALLBACK_EVENT, handleFallback);
+
+    return () => window.removeEventListener(TRANSCRIPTION_FALLBACK_EVENT, handleFallback);
+  }, [roomCode, displayName]);
 
   const handleSend = useCallback(() => {
     if (!inputText.trim() || !send) return;
