@@ -83,7 +83,7 @@ export default function ResetPassword() {
 
     try {
       const response = await fetch(
-        "http://localhost:8000/api/password/validate-token",
+        "https://libras-api-rough-rain-8952.fly.dev/api/v1/password/validate-token",
         {
           method: "POST",
           headers: {
@@ -91,7 +91,7 @@ export default function ResetPassword() {
             Accept: "application/json",
           },
           body: JSON.stringify({ token, email }),
-        }
+        },
       );
 
       const data = await response.json();
@@ -127,19 +127,22 @@ export default function ResetPassword() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8000/api/password/reset", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
+      const response = await fetch(
+        "https://libras-api-rough-rain-8952.fly.dev/api/v1/password/reset",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            email,
+            token,
+            password,
+            password_confirmation: confirmPassword,
+          }),
         },
-        body: JSON.stringify({
-          email,
-          token,
-          password,
-          password_confirmation: confirmPassword,
-        }),
-      });
+      );
 
       const data = await response.json();
 
@@ -149,7 +152,7 @@ export default function ResetPassword() {
       } else {
         showToast(
           data.message || "Erro ao resetar senha. Tente novamente.",
-          "error"
+          "error",
         );
       }
     } catch (error) {
