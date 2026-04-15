@@ -31,7 +31,7 @@ export default function ForgotPassword() {
         setLoading(true);
 
         try {
-            const response = await fetch("http://localhost:8000/api/v1/password/forgot", {
+            const response = await fetch("https://libras-api-rough-rain-8952.fly.dev/api/v1/password/forgot", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
