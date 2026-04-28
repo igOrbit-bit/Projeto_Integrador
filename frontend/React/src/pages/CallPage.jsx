@@ -16,17 +16,18 @@ import "@livekit/components-styles";
 import { QRCodeSVG } from "qrcode.react";
 import axios from "axios";
 import echo from "../echo";
+import { API_BASE_URL, getAuthHeaders } from "../services/api";
 
-const LIVEKIT_URL = "wss://libras-2iiad817.livekit.cloud";
+const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "wss://libras-2iiad817.livekit.cloud";
 const CHAT_TOPIC = "chat-message";
 const TRANSCRIPTION_FALLBACK_EVENT = "transcription:received";
+const CHAT_SYNC_INTERVAL_MS = 2500;
 
 const SILENCE_THRESHOLD = 0.006;
-const SILENCE_DURATION  = 600;
-const MAX_DURATION      = 4000;
-const MIN_BLOB_BYTES    = 800;
-
-const API_URL = import.meta.env.VITE_API_URL;
+const SILENCE_DURATION  = 850;
+const MAX_DURATION      = 6000;
+const MIN_BLOB_BYTES    = 1800;
+const MIN_DURATION_MS   = 900;
 
 function appendUniqueMessage(previousMessages, nextMessage) {
   if (nextMessage?.serverId && previousMessages.some((message) => message.serverId === nextMessage.serverId)) {
@@ -36,11 +37,85 @@ function appendUniqueMessage(previousMessages, nextMessage) {
   return [...previousMessages, nextMessage];
 }
 
-function authHeaders() {
-  return { Authorization: `Bearer ${localStorage.getItem("authToken")}` };
+function normalizeServerMessage(message, displayName, isHistory = false) {
+  return {
+    id: `srv-${message.id}`,
+    serverId: message.id,
+    name: message.participant_name,
+    text: message.message,
+    type: message.type,
+    time: message.time,
+    isLocal: message.participant_name === displayName,
+    isHistory,
+  };
+}
+
+function sameMessageContent(left, right) {
+  return left.type === right.type
+    && left.name === right.name
+    && left.text === right.text
+    && left.time === right.time;
+}
+
+function mergeServerMessages(previousMessages, serverMessages) {
+  const previousByServerId = new Map(
+    previousMessages
+      .filter((message) => message.serverId)
+      .map((message) => [message.serverId, message])
+  );
+  const nextServerIds = new Set(serverMessages.map((message) => message.serverId).filter(Boolean));
+
+  const withoutReplacedMessages = previousMessages.filter((message) => {
+    if (message.serverId && nextServerIds.has(message.serverId)) {
+      return false;
+    }
+
+    return !serverMessages.some((serverMessage) => !message.serverId && sameMessageContent(message, serverMessage));
+  });
+
+  const syncedServerMessages = serverMessages.map((message) => {
+    const previousMessage = previousByServerId.get(message.serverId);
+
+    return previousMessage
+      ? { ...message, isHistory: previousMessage.isHistory }
+      : message;
+  });
+
+  return [...withoutReplacedMessages, ...syncedServerMessages];
 }
 
 /* ================= TTS ================= */
+function normalizeVoiceLang(lang = "") {
+  return lang.toLowerCase().replace("_", "-");
+}
+
+function getPortugueseVoices() {
+  const availableVoices = window.speechSynthesis?.getVoices?.() || [];
+  const brazilianVoices = availableVoices.filter(v => normalizeVoiceLang(v.lang) === "pt-br");
+  const portugueseVoices = availableVoices.filter(v => normalizeVoiceLang(v.lang).startsWith("pt"));
+
+  return brazilianVoices.length ? brazilianVoices : portugueseVoices;
+}
+
+function getVoiceLabel(voice) {
+  const lang = normalizeVoiceLang(voice.lang);
+  const suffix = lang === "pt-br" ? "Brasil" : voice.lang;
+
+  return `${voice.name} - ${suffix}`;
+}
+
+function getPreferredBrazilianVoice(settings = {}) {
+  const availableVoices = window.speechSynthesis?.getVoices?.() || [];
+
+  if (settings.voiceURI) {
+    const selectedVoice = availableVoices.find(v => v.voiceURI === settings.voiceURI);
+
+    if (selectedVoice) return selectedVoice;
+  }
+
+  return getPortugueseVoices()[0] || null;
+}
+
 function speak(text, settings = {}) {
   if (!window.speechSynthesis) return;
   window.speechSynthesis.cancel();
@@ -49,22 +124,49 @@ function speak(text, settings = {}) {
   utt.rate = settings.rate ?? 1.0;
   utt.pitch = settings.pitch ?? 1.0;
   utt.volume = settings.volume ?? 1.0;
-  if (settings.voiceURI) {
-    const v = window.speechSynthesis.getVoices().find(v => v.voiceURI === settings.voiceURI);
-    if (v) utt.voice = v;
-  }
+  const voice = getPreferredBrazilianVoice(settings);
+  if (voice) utt.voice = voice;
   window.speechSynthesis.speak(utt);
 }
 
 /* ================= Envia áudio ================= */
-async function sendAudio(blob, mimeType, participantName, roomCode) {
-  if (!blob || blob.size < MIN_BLOB_BYTES) return;
+function ChatSpeechListener({ ttsSettings }) {
+  const { localParticipant } = useLocalParticipant();
+
+  useEffect(() => {
+    const loadVoices = () => getPortugueseVoices();
+
+    loadVoices();
+    window.speechSynthesis.addEventListener?.("voiceschanged", loadVoices);
+
+    return () => {
+      window.speechSynthesis.removeEventListener?.("voiceschanged", loadVoices);
+    };
+  }, []);
+
+  useDataChannel(CHAT_TOPIC, (msg) => {
+    try {
+      const decoded = JSON.parse(new TextDecoder().decode(msg.payload));
+
+      if (decoded.identity !== localParticipant?.identity && decoded.text?.trim()) {
+        speak(decoded.text, ttsSettings);
+      }
+    } catch (error) {
+      console.error("Erro ao falar mensagem do chat", error);
+    }
+  });
+
+  return null;
+}
+
+async function sendAudio(blob, mimeType, participantName, roomCode, durationMs) {
+  if (!blob || blob.size < MIN_BLOB_BYTES || durationMs < MIN_DURATION_MS) return;
   const ext = mimeType.includes("ogg") ? "ogg" : "webm";
   const buffer = await blob.arrayBuffer();
   const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
-  const response = await axios.post(`${API_URL}/api/v1/transcribe`,
-    { audio: base64, audio_ext: ext, participant_name: participantName, room_code: roomCode },
-    { headers: authHeaders() }
+  const response = await axios.post(`${API_BASE_URL}/transcribe`,
+    { audio: base64, audio_ext: ext, audio_duration_ms: durationMs, participant_name: participantName, room_code: roomCode },
+    { headers: getAuthHeaders() }
   );
 
   return response.data;
@@ -72,15 +174,18 @@ async function sendAudio(blob, mimeType, participantName, roomCode) {
 
 /* ================= Transcrição com detecção de silêncio ================= */
 function AudioTranscriber({ roomCode, userName, onSpeakingChange }) {
-  const { localParticipant } = useLocalParticipant();
+  const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
 
   useEffect(() => {
-    if (!localParticipant) return;
+    if (!localParticipant || !isMicrophoneEnabled) {
+      onSpeakingChange?.(false);
+      return;
+    }
     const getName = () => userName || localParticipant.name || localParticipant.identity || "Usuário";
 
     let active = true, mediaRecorder = null, chunks = [], silenceTimer = null;
     let maxTimer = null, audioCtx = null, analyser = null, rafId = null;
-    let stream = null, isRecording = false;
+    let stream = null, isRecording = false, recordingStartedAt = 0;
 
     const mimeType = MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")
       ? "audio/ogg;codecs=opus"
@@ -97,7 +202,7 @@ function AudioTranscriber({ roomCode, userName, onSpeakingChange }) {
 
     const startRecording = () => {
       if (!active || !stream) return;
-      chunks = []; isRecording = true;
+      chunks = []; isRecording = true; recordingStartedAt = Date.now();
       onSpeakingChange?.(true);
       mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
@@ -106,7 +211,8 @@ function AudioTranscriber({ roomCode, userName, onSpeakingChange }) {
         onSpeakingChange?.(false);
         if (!active) return;
         const blob = new Blob(chunks, { type: mimeType });
-        const response = await sendAudio(blob, mimeType, getName(), roomCode);
+        const durationMs = Date.now() - recordingStartedAt;
+        const response = await sendAudio(blob, mimeType, getName(), roomCode, durationMs);
 
         if (response?.persisted && response.message) {
           window.dispatchEvent(new CustomEvent(TRANSCRIPTION_FALLBACK_EVENT, {
@@ -143,6 +249,9 @@ function AudioTranscriber({ roomCode, userName, onSpeakingChange }) {
       analyser.fftSize = 2048;
       source.connect(analyser);
       rafId = requestAnimationFrame(analyseLoop);
+    }).catch((error) => {
+      console.error("Erro ao acessar microfone para transcricao", error);
+      onSpeakingChange?.(false);
     });
 
     return () => {
@@ -152,8 +261,9 @@ function AudioTranscriber({ roomCode, userName, onSpeakingChange }) {
       if (mediaRecorder?.state === "recording") mediaRecorder.stop();
       stream?.getTracks().forEach(t => t.stop());
       audioCtx?.close();
+      onSpeakingChange?.(false);
     };
-  }, [localParticipant, roomCode, userName]);
+  }, [localParticipant, isMicrophoneEnabled, roomCode, userName, onSpeakingChange]);
 
   return null;
 }
@@ -161,16 +271,16 @@ function AudioTranscriber({ roomCode, userName, onSpeakingChange }) {
 /* ================= Modal QR Code ================= */
 function QRModal({ roomCode, onClose }) {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
-      <div style={{ background: "#18181b", border: "1px solid #27272a", borderRadius: 16, padding: 32, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>Compartilhar Sala</h3>
-        <div style={{ background: "#fff", padding: 16, borderRadius: 12 }}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70" onClick={onClose}>
+      <div className="flex flex-col items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-8" onClick={e => e.stopPropagation()}>
+        <h3 className="text-base font-bold text-white">Compartilhar Sala</h3>
+        <div className="rounded-xl bg-white p-4">
           <QRCodeSVG value={roomCode} size={180} />
         </div>
-        <div style={{ background: "#27272a", borderRadius: 8, padding: "8px 20px", fontFamily: "monospace", fontSize: 20, color: "#fff", letterSpacing: 4, fontWeight: 700 }}>
+        <div className="rounded-lg bg-zinc-800 px-5 py-2 font-mono text-xl font-bold tracking-[4px] text-white">
           {roomCode}
         </div>
-        <button onClick={onClose} style={{ padding: "8px 24px", background: "#ea580c", border: "none", borderRadius: 8, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+        <button onClick={onClose} className="rounded-lg bg-orange-600 px-6 py-2 text-[13px] font-semibold text-white">
           Fechar
         </button>
       </div>
@@ -184,34 +294,50 @@ function TTSModal({ settings, onChange, onClose }) {
   const [local, setLocal] = useState(settings);
 
   useEffect(() => {
-    const load = () => setVoices(window.speechSynthesis.getVoices().filter(v => v.lang.startsWith("pt")));
+    const load = () => {
+      const nextVoices = getPortugueseVoices();
+
+      setVoices(nextVoices);
+      setLocal((current) => {
+        if (current.voiceURI || nextVoices.length === 0) {
+          return current;
+        }
+
+        return { ...current, voiceURI: nextVoices[0].voiceURI };
+      });
+    };
+
     load();
-    window.speechSynthesis.onvoiceschanged = load;
+    window.speechSynthesis.addEventListener?.("voiceschanged", load);
+
+    return () => {
+      window.speechSynthesis.removeEventListener?.("voiceschanged", load);
+    };
   }, []);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
-      <div style={{ background: "#18181b", border: "1px solid #27272a", borderRadius: 16, padding: 28, width: 320, display: "flex", flexDirection: "column", gap: 20 }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>🔊 Configurações de Voz</h3>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70" onClick={onClose}>
+      <div className="flex w-80 flex-col gap-5 rounded-2xl border border-zinc-800 bg-zinc-900 p-7" onClick={e => e.stopPropagation()}>
+        <h3 className="text-base font-bold text-white">🔊 Configurações de Voz</h3>
         <div>
-          <label style={{ fontSize: 11, color: "#a1a1aa", display: "block", marginBottom: 6 }}>VOZ</label>
+          <label className="mb-1.5 block text-[11px] text-zinc-400">VOZ</label>
           <select value={local.voiceURI || ""} onChange={e => setLocal(p => ({ ...p, voiceURI: e.target.value }))}
-            style={{ width: "100%", background: "#27272a", border: "1px solid #3f3f46", borderRadius: 8, padding: "8px 12px", color: "#fff", fontSize: 13, outline: "none" }}>
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-[13px] text-white outline-none">
             <option value="">Padrão do sistema</option>
-            {voices.map(v => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
+            {voices.map(v => <option key={v.voiceURI} value={v.voiceURI}>{getVoiceLabel(v)}</option>)}
           </select>
         </div>
         <div>
-          <label style={{ fontSize: 11, color: "#a1a1aa", display: "block", marginBottom: 6 }}>VELOCIDADE — {local.rate?.toFixed(1)}x</label>
-          <input type="range" min="0.5" max="2" step="0.1" value={local.rate ?? 1} onChange={e => setLocal(p => ({ ...p, rate: parseFloat(e.target.value) }))} style={{ width: "100%", accentColor: "#ea580c" }} />
+          <label className="mb-1.5 block text-[11px] text-zinc-400">VELOCIDADE — {local.rate?.toFixed(1)}x</label>
+          <input className="w-full accent-orange-600" type="range" min="0.5" max="2" step="0.1" value={local.rate ?? 1} onChange={e => setLocal(p => ({ ...p, rate: parseFloat(e.target.value) }))} />
         </div>
         <div>
-          <label style={{ fontSize: 11, color: "#a1a1aa", display: "block", marginBottom: 6 }}>TOM — {local.pitch?.toFixed(1)}</label>
-          <input type="range" min="0.5" max="2" step="0.1" value={local.pitch ?? 1} onChange={e => setLocal(p => ({ ...p, pitch: parseFloat(e.target.value) }))} style={{ width: "100%", accentColor: "#ea580c" }} />
+          <label className="mb-1.5 block text-[11px] text-zinc-400">TOM — {local.pitch?.toFixed(1)}</label>
+          <input className="w-full accent-orange-600" type="range" min="0.5" max="2" step="0.1" value={local.pitch ?? 1} onChange={e => setLocal(p => ({ ...p, pitch: parseFloat(e.target.value) }))} />
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => speak("Olá, esta é uma voz de teste!", local)} style={{ flex: 1, padding: "9px", background: "#27272a", border: "1px solid #3f3f46", borderRadius: 8, color: "#fff", fontSize: 13, cursor: "pointer" }}>🔈 Testar</button>
-          <button onClick={() => { onChange(local); onClose(); }} style={{ flex: 1, padding: "9px", background: "#ea580c", border: "none", borderRadius: 8, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Salvar</button>
+        <div className="flex gap-2">
+          <button onClick={() => speak("Olá, esta é uma voz de teste!", local)} className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 p-[9px] text-[13px] text-white">🔈 Testar</button>
+          <button onClick={() => { onChange(local); onClose(); }} className="flex-1 rounded-lg bg-orange-600 p-[9px] text-[13px] font-semibold text-white">Salvar</button>
         </div>
       </div>
     </div>
@@ -219,7 +345,7 @@ function TTSModal({ settings, onChange, onClose }) {
 }
 
 /* ================= Chat Unificado com histórico ================= */
-function UnifiedChat({ roomCode, userName, onClose, isMobile, ttsSettings, onUnread }) {
+function UnifiedChat({ roomCode, userName, onClose, isMobile, onUnread }) {
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -228,28 +354,34 @@ function UnifiedChat({ roomCode, userName, onClose, isMobile, ttsSettings, onUnr
   const displayName = userName || localParticipant?.name || "Você";
   const isFirstLoad = useRef(true);
 
-  useEffect(() => {
-    const fetchHistory = async () => {
-      try {
-        const res = await axios.get(`${API_URL}/api/v1/transcriptions/${roomCode}`, { headers: authHeaders() });
-        const history = (res.data.messages || []).map(m => ({
-          id: `hist-${m.id}`,
-          name: m.participant_name,
-          text: m.message,
-          type: m.type,
-          time: m.time,
-          isLocal: m.participant_name === displayName,
-          isHistory: true,
-        }));
-        setMessages(history);
-      } catch (e) {
+  const syncHistory = useCallback(async (isInitialLoad = false) => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/transcriptions/${roomCode}`, { headers: getAuthHeaders() });
+      const history = (res.data.messages || []).map((message) => normalizeServerMessage(message, displayName, isInitialLoad));
+
+      setMessages((previousMessages) => (
+        isInitialLoad ? history : mergeServerMessages(previousMessages, history)
+      ));
+    } catch (e) {
         console.error("Erro ao carregar histórico", e);
-      } finally {
+    } finally {
+      if (isInitialLoad) {
         setLoadingHistory(false);
       }
-    };
-    fetchHistory();
-  }, [roomCode]);
+    }
+  }, [roomCode, displayName]);
+
+  useEffect(() => {
+    setLoadingHistory(true);
+    isFirstLoad.current = true;
+    syncHistory(true);
+
+    const intervalId = window.setInterval(() => {
+      syncHistory(false);
+    }, CHAT_SYNC_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [syncHistory]);
 
   useEffect(() => {
     if (!loadingHistory && isFirstLoad.current) {
@@ -265,14 +397,15 @@ function UnifiedChat({ roomCode, userName, onClose, isMobile, ttsSettings, onUnr
   const { send } = useDataChannel(CHAT_TOPIC, (msg) => {
     try {
       const decoded = JSON.parse(new TextDecoder().decode(msg.payload));
-      if (decoded.identity !== localParticipant?.identity) speak(decoded.text, ttsSettings);
       setMessages((prev) => [...prev, {
         id: Date.now() + Math.random(), name: decoded.name, text: decoded.text, type: "chat",
         time: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
         isLocal: decoded.identity === localParticipant?.identity,
       }]);
       onUnread?.();
-    } catch (_) {}
+    } catch (error) {
+      console.error("Erro ao receber mensagem do chat", error);
+    }
   });
 
   useEffect(() => {
@@ -287,7 +420,7 @@ function UnifiedChat({ roomCode, userName, onClose, isMobile, ttsSettings, onUnr
       onUnread?.();
     });
     return () => echo.leaveChannel(`room.${roomCode}`);
-  }, [roomCode, onUnread]);
+  }, [roomCode, onUnread, displayName]);
 
   useEffect(() => {
     const handleFallback = (event) => {
@@ -318,10 +451,16 @@ function UnifiedChat({ roomCode, userName, onClose, isMobile, ttsSettings, onUnr
     const text = inputText.trim();
     const payload = { name: displayName, identity: localParticipant?.identity, text };
     send(new TextEncoder().encode(JSON.stringify(payload)), { reliable: true });
-    axios.post(`${API_URL}/api/v1/chat-message`,
+    axios.post(`${API_BASE_URL}/chat-message`,
       { room_code: roomCode, participant_name: displayName, message: text },
-      { headers: authHeaders() }
-    ).catch(console.error);
+      { headers: getAuthHeaders() }
+    ).then((response) => {
+      if (!response.data?.message) return;
+
+      const persistedMessage = normalizeServerMessage(response.data.message, displayName);
+
+      setMessages((prev) => mergeServerMessages(prev, [persistedMessage]));
+    }).catch(console.error);
     setMessages((prev) => [...prev, {
       id: Date.now(), name: displayName, text, type: "chat",
       time: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
@@ -331,50 +470,55 @@ function UnifiedChat({ roomCode, userName, onClose, isMobile, ttsSettings, onUnr
   }, [inputText, send, localParticipant, displayName, roomCode]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#111", borderLeft: isMobile ? "none" : "1px solid #27272a" }}>
-      <div style={{ padding: "12px 16px", borderBottom: "1px solid #27272a", fontSize: 13, fontWeight: 600, color: "#fff", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+    <div className={`flex h-full flex-col bg-[#111] ${isMobile ? "" : "border-l border-zinc-800"}`}>
+      <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-3 text-[13px] font-semibold text-white">
         <span>💬 Chat & Transcrições</span>
-        {isMobile && <button onClick={onClose} style={{ background: "none", border: "none", color: "#a1a1aa", fontSize: 18, cursor: "pointer" }}>✕</button>}
+        {isMobile && <button onClick={onClose} className="text-lg text-zinc-400">✕</button>}
       </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-3 pt-3">
         {loadingHistory ? (
-          <p style={{ fontSize: 12, color: "#52525b", textAlign: "center", marginTop: 16 }}>Carregando histórico...</p>
+          <p className="mt-4 text-center text-xs text-zinc-600">Carregando histórico...</p>
         ) : (
           <>
             {messages.length === 0 && (
-              <p style={{ fontSize: 12, color: "#52525b", textAlign: "center", marginTop: 16 }}>As mensagens e transcrições aparecerão aqui...</p>
+              <p className="mt-4 text-center text-xs text-zinc-600">As mensagens e transcrições aparecerão aqui...</p>
             )}
             {messages.some(m => m.isHistory) && messages.some(m => !m.isHistory) && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
-                <div style={{ flex: 1, height: 1, background: "#27272a" }} />
-                <span style={{ fontSize: 10, color: "#52525b", whiteSpace: "nowrap" }}>mensagens anteriores</span>
-                <div style={{ flex: 1, height: 1, background: "#27272a" }} />
+              <div className="my-1 flex items-center gap-2">
+                <div className="h-px flex-1 bg-zinc-800" />
+                <span className="whitespace-nowrap text-[10px] text-zinc-600">mensagens anteriores</span>
+                <div className="h-px flex-1 bg-zinc-800" />
               </div>
             )}
             {messages.map((msg, i) => {
               const isFirstNew = !msg.isHistory && (i === 0 || messages[i - 1]?.isHistory);
+              const messageClass = msg.type === "transcription"
+                ? "border-indigo-800 bg-[#1c1c2e]"
+                : msg.isLocal
+                  ? "border-green-800 bg-[#1a2e1a]"
+                  : "border-zinc-800 bg-[#1e1e1e]";
+              const nameClass = msg.type === "transcription"
+                ? "text-indigo-300"
+                : msg.isLocal
+                  ? "text-green-400"
+                  : "text-orange-400";
               return (
                 <div key={msg.id}>
                   {isFirstNew && messages.some(m => m.isHistory) && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 0" }}>
-                      <div style={{ flex: 1, height: 1, background: "#3f3f46" }} />
-                      <span style={{ fontSize: 10, color: "#71717a", whiteSpace: "nowrap" }}>agora</span>
-                      <div style={{ flex: 1, height: 1, background: "#3f3f46" }} />
+                    <div className="my-2 flex items-center gap-2">
+                      <div className="h-px flex-1 bg-zinc-700" />
+                      <span className="whitespace-nowrap text-[10px] text-zinc-500">agora</span>
+                      <div className="h-px flex-1 bg-zinc-700" />
                     </div>
                   )}
-                  <div style={{
-                    background: msg.type === "transcription" ? "#1c1c2e" : msg.isLocal ? "#1a2e1a" : "#1e1e1e",
-                    border: `1px solid ${msg.type === "transcription" ? "#3730a3" : msg.isLocal ? "#166534" : "#27272a"}`,
-                    borderRadius: 10, padding: "8px 12px",
-                    opacity: msg.isHistory ? 0.75 : 1,
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: msg.type === "transcription" ? "#818cf8" : msg.isLocal ? "#4ade80" : "#fb923c" }}>
+                  <div className={`rounded-[10px] border px-3 py-2 ${messageClass} ${msg.isHistory ? "opacity-75" : "opacity-100"}`}>
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className={`text-[11px] font-bold ${nameClass}`}>
                         {msg.type === "transcription" ? "🎙️ " : "💬 "}{msg.name}
                       </span>
-                      <span style={{ fontSize: 10, color: "#52525b" }}>{msg.time}</span>
+                      <span className="text-[10px] text-zinc-600">{msg.time}</span>
                     </div>
-                    <p style={{ fontSize: 13, color: "#e4e4e7", lineHeight: 1.4 }}>{msg.text}</p>
+                    <p className="text-[13px] leading-[1.4] text-zinc-200">{msg.text}</p>
                   </div>
                 </div>
               );
@@ -383,21 +527,15 @@ function UnifiedChat({ roomCode, userName, onClose, isMobile, ttsSettings, onUnr
         )}
         <div ref={bottomRef} />
       </div>
-      <div style={{ padding: "10px 12px", borderTop: "1px solid #27272a", display: "flex", gap: 8, flexShrink: 0 }}>
+      <div className="flex shrink-0 gap-2 border-t border-zinc-800 px-3 py-2.5">
         <input
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
           placeholder="Digite uma mensagem..."
-          style={{ flex: 1, background: "#27272a", border: "1px solid #3f3f46", borderRadius: 8, padding: "8px 12px", color: "#fff", fontSize: 13, outline: "none" }}
+          className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-[13px] text-white outline-none"
         />
-        <button onClick={handleSend} disabled={!inputText.trim()} style={{
-          padding: "8px 14px", border: "none", borderRadius: 8,
-          background: inputText.trim() ? "#ea580c" : "#27272a",
-          color: "#fff", fontSize: 13, fontWeight: 600,
-          cursor: inputText.trim() ? "pointer" : "not-allowed",
-          transition: "background 0.15s",
-        }}>
+        <button onClick={handleSend} disabled={!inputText.trim()} className={`rounded-lg px-3.5 py-2 text-[13px] font-semibold text-white transition-colors ${inputText.trim() ? "bg-orange-600" : "cursor-not-allowed bg-zinc-800"}`}>
           Enviar
         </button>
       </div>
@@ -415,19 +553,19 @@ function VideoLayout({ speakingLocal }) {
     { onlySubscribed: false }
   );
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-        <GridLayout tracks={tracks} style={{ height: "100%" }}>
+    <div className="flex h-full flex-col">
+      <div className="relative flex-1 overflow-hidden">
+        <GridLayout tracks={tracks} className="h-full">
           <ParticipantTile />
         </GridLayout>
         {speakingLocal && (
-          <div style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", background: "rgba(99,102,241,0.9)", borderRadius: 20, padding: "6px 14px", display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#fff", backdropFilter: "blur(8px)", zIndex: 5 }}>
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#fff", animation: "pulse 1s infinite" }} />
+          <div className="absolute bottom-3 left-1/2 z-[5] flex -translate-x-1/2 items-center gap-2 rounded-full bg-indigo-500/90 px-3.5 py-1.5 text-xs text-white backdrop-blur">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
             Transcrevendo...
           </div>
         )}
       </div>
-      <div style={{ background: "#18181b", flexShrink: 0 }}>
+      <div className="shrink-0 bg-zinc-900">
         <ControlBar controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: true }} />
       </div>
     </div>
@@ -438,18 +576,18 @@ function VideoLayout({ speakingLocal }) {
 function ParticipantsList({ onClose, isMobile }) {
   const participants = useParticipants();
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#111", borderLeft: isMobile ? "none" : "1px solid #27272a" }}>
-      <div style={{ padding: "12px 16px", borderBottom: "1px solid #27272a", fontSize: 13, fontWeight: 600, color: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+    <div className={`flex h-full flex-col bg-[#111] ${isMobile ? "" : "border-l border-zinc-800"}`}>
+      <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-3 text-[13px] font-semibold text-white">
         <span>👥 Participantes</span>
-        {isMobile && <button onClick={onClose} style={{ background: "none", border: "none", color: "#a1a1aa", fontSize: 18, cursor: "pointer" }}>✕</button>}
+        {isMobile && <button onClick={onClose} className="text-lg text-zinc-400">✕</button>}
       </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
         {participants.map((p) => (
-          <div key={p.identity} style={{ display: "flex", alignItems: "center", gap: 10, background: "#27272a", padding: "8px 12px", borderRadius: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#f97316,#ea580c)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
+          <div key={p.identity} className="flex items-center gap-2.5 rounded-[10px] bg-zinc-800 px-3 py-2">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-orange-600 text-sm font-bold text-white">
               {(p.name || "?").charAt(0).toUpperCase()}
             </div>
-            <span style={{ fontSize: 13, color: "#e4e4e7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span className="truncate whitespace-nowrap text-[13px] text-zinc-200">
               {p.name || "Sem nome"}
             </span>
           </div>
@@ -487,66 +625,64 @@ export default function CallPage() {
   const [speakingLocal, setSpeakingLocal] = useState(false);
   const [ttsSettings, setTtsSettings] = useState({ rate: 1.0, pitch: 1.0, volume: 1.0, voiceURI: "" });
 
-  useEffect(() => { if (showChat) setUnreadCount(0); }, [showChat]);
-
   // ── Apaga histórico ao sair ──────────────────────────────────────────────
   const handleDisconnected = useCallback(() => {
-    axios.delete(`${API_URL}/api/v1/transcriptions/${roomCode}`, { headers: authHeaders() })
+    axios.delete(`${API_BASE_URL}/transcriptions/${roomCode}`, { headers: getAuthHeaders() })
       .catch(console.error);
     navigate("/home");
   }, [roomCode, navigate]);
 
   if (!token || !roomCode) {
     return (
-      <div style={{ padding: 40 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700 }}>Erro</h2>
+      <div className="p-10">
+        <h2 className="text-xl font-bold">Erro</h2>
         <p>Você entrou na sala de forma inválida.</p>
-        <button onClick={() => navigate("/")} style={{ marginTop: 16, padding: "8px 16px", background: "#000", color: "#fff", borderRadius: 8, border: "none", cursor: "pointer" }}>Voltar</button>
+        <button onClick={() => navigate("/")} className="mt-4 rounded-lg bg-black px-4 py-2 text-white">Voltar</button>
       </div>
     );
   }
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#09090b", overflow: "hidden" }}>
+    <div className="flex h-screen flex-col overflow-hidden bg-[#09090b]">
       {showQR && <QRModal roomCode={roomCode} onClose={() => setShowQR(false)} />}
       {showTTS && <TTSModal settings={ttsSettings} onChange={setTtsSettings} onClose={() => setShowTTS(false)} />}
 
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", background: "#18181b", borderBottom: "1px solid #27272a", flexShrink: 0, zIndex: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 13, color: "#e4e4e7" }}>Sala: <strong>{roomCode}</strong></span>
+      <div className="z-10 flex shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="text-[13px] text-zinc-200">Sala: <strong>{roomCode}</strong></span>
           <button onClick={() => { navigator.clipboard.writeText(roomCode); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-            style={{ fontSize: 11, background: "#27272a", border: "1px solid #3f3f46", borderRadius: 6, padding: "3px 8px", color: "#a1a1aa", cursor: "pointer" }}>
+            className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-[3px] text-[11px] text-zinc-400">
             {copied ? "✓" : "Copiar"}
           </button>
           <button onClick={() => setShowQR(true)}
-            style={{ fontSize: 11, background: "#27272a", border: "1px solid #3f3f46", borderRadius: 6, padding: "3px 8px", color: "#a1a1aa", cursor: "pointer" }}>
+            className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-[3px] text-[11px] text-zinc-400">
             📷 QR
           </button>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="flex items-center gap-2">
           <button onClick={() => setShowTTS(true)}
-            style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", background: "#27272a", color: "#a1a1aa" }}>
+            className="rounded-md bg-zinc-800 px-2.5 py-1 text-xs text-zinc-400">
             🔊
           </button>
           <button onClick={() => { setShowChat(!showChat); setShowParticipants(false); setUnreadCount(0); }}
-            style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: showChat ? "#ea580c" : "#27272a", color: "#fff", fontWeight: showChat ? 700 : 400, transition: "background 0.15s", position: "relative" }}>
+            className={`relative rounded-md px-3 py-1 text-xs text-white transition-colors ${showChat ? "bg-orange-600 font-bold" : "bg-zinc-800 font-normal"}`}>
             💬 Chat
             {unreadCount > 0 && !showChat && (
-              <span style={{ position: "absolute", top: -6, right: -6, background: "#ef4444", color: "#fff", borderRadius: "50%", width: 18, height: 18, fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span className="absolute -right-1.5 -top-1.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
                 {unreadCount > 9 ? "9+" : unreadCount}
               </span>
             )}
           </button>
           <button onClick={() => { setShowParticipants(!showParticipants); setShowChat(false); }}
-            style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: showParticipants ? "#ea580c" : "#27272a", color: "#fff", fontWeight: showParticipants ? 700 : 400, transition: "background 0.15s" }}>
+            className={`rounded-md px-3 py-1 text-xs text-white transition-colors ${showParticipants ? "bg-orange-600 font-bold" : "bg-zinc-800 font-normal"}`}>
             👥
           </button>
         </div>
       </div>
 
       {/* Conteúdo */}
-      <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
+      <div className="relative flex flex-1 overflow-hidden">
         <LiveKitRoom
           serverUrl={LIVEKIT_URL}
           token={token}
@@ -555,22 +691,23 @@ export default function CallPage() {
           audio={true}
           onDisconnected={handleDisconnected}
           data-lk-theme="default"
-          style={{ flex: 1, display: "flex", overflow: "hidden" }}
+          className="flex flex-1 overflow-hidden"
         >
           <RoomAudioRenderer />
+          <ChatSpeechListener ttsSettings={ttsSettings} />
           <AudioTranscriber roomCode={roomCode} userName={userName} onSpeakingChange={setSpeakingLocal} />
 
-          <div style={{ flex: 1, overflow: "hidden", minWidth: 0 }}>
+          <div className="min-w-0 flex-1 overflow-hidden">
             <VideoLayout speakingLocal={speakingLocal} />
           </div>
 
           {!isMobile && showChat && (
-            <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column" }}>
-              <UnifiedChat roomCode={roomCode} userName={userName} onClose={() => setShowChat(false)} isMobile={false} ttsSettings={ttsSettings} onUnread={() => !showChat && setUnreadCount(c => c + 1)} />
+            <div className="flex w-80 shrink-0 flex-col">
+              <UnifiedChat roomCode={roomCode} userName={userName} onClose={() => setShowChat(false)} isMobile={false} onUnread={() => !showChat && setUnreadCount(c => c + 1)} />
             </div>
           )}
           {!isMobile && showParticipants && (
-            <div style={{ width: 260, flexShrink: 0 }}>
+            <div className="w-[260px] shrink-0">
               <ParticipantsList onClose={() => setShowParticipants(false)} isMobile={false} />
             </div>
           )}
@@ -578,9 +715,9 @@ export default function CallPage() {
           {isMobile && (showChat || showParticipants) && (
             <>
               <div onClick={() => { setShowChat(false); setShowParticipants(false); }}
-                style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 20 }} />
-              <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: "70%", zIndex: 30, borderRadius: "16px 16px 0 0", overflow: "hidden", animation: "slideUp 0.25s ease" }}>
-                {showChat && <UnifiedChat roomCode={roomCode} userName={userName} onClose={() => setShowChat(false)} isMobile={true} ttsSettings={ttsSettings} onUnread={() => !showChat && setUnreadCount(c => c + 1)} />}
+                className="absolute inset-0 z-20 bg-black/50" />
+              <div className="absolute bottom-0 left-0 right-0 z-30 h-[70%] overflow-hidden rounded-t-2xl">
+                {showChat && <UnifiedChat roomCode={roomCode} userName={userName} onClose={() => setShowChat(false)} isMobile={true} onUnread={() => !showChat && setUnreadCount(c => c + 1)} />}
                 {showParticipants && <ParticipantsList onClose={() => setShowParticipants(false)} isMobile={true} />}
               </div>
             </>
@@ -588,10 +725,6 @@ export default function CallPage() {
         </LiveKitRoom>
       </div>
 
-      <style>{`
-        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.8); } }
-      `}</style>
     </div>
   );
 }
