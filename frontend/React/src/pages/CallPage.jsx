@@ -344,15 +344,232 @@ function TTSModal({ settings, onChange, onClose }) {
   );
 }
 
+/* ================= VLibras Avatar ================= */
+const VLIBRAS_PLAYER_SCRIPT = "/vlibras-player/vlibras.js";
+const VLIBRAS_TARGET_PATH = "/vlibras-player/target";
+const VLIBRAS_BASE_SPEED = 1.5;
+const VLIBRAS_FAST_SPEED = 2.0;
+
+function VLibrasAvatar({ transcriptions, visible }) {
+  const containerRef = useRef(null);
+  const playerRef = useRef(null);
+  const timeoutRef = useRef(null);
+  const itemTimeoutRef = useRef(null);
+  const queueRef = useRef([]);
+  const seenIdsRef = useRef(new Set());
+  const playingRef = useRef(false);
+  const startedRef = useRef(false);
+  const minEndAtRef = useRef(0);
+  const statusRef = useRef("idle");
+  const [status, setStatus] = useState("idle");
+  const [queueSize, setQueueSize] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentItem, setCurrentItem] = useState(null);
+
+  const applySpeed = useCallback(() => {
+    if (!playerRef.current) return;
+    const speed = queueRef.current.length > 0 ? VLIBRAS_FAST_SPEED : VLIBRAS_BASE_SPEED;
+    try {
+      playerRef.current.setSpeed(speed);
+    } catch (error) {
+      console.warn("[VLibras] setSpeed error:", error);
+    }
+  }, []);
+
+  const finalizeCurrent = useCallback((reason = "end") => {
+    if (!playingRef.current) return;
+
+    const now = Date.now();
+    if (now < minEndAtRef.current && reason === "event") {
+      return;
+    }
+
+    if (itemTimeoutRef.current) clearTimeout(itemTimeoutRef.current);
+    playingRef.current = false;
+    startedRef.current = false;
+    setIsPlaying(false);
+    setCurrentItem(null);
+  }, []);
+
+  const playNext = useCallback(() => {
+    if (!playerRef.current || statusRef.current !== "ready" || playingRef.current) return;
+
+    const nextItem = queueRef.current.shift();
+    setQueueSize(queueRef.current.length);
+    applySpeed();
+
+    if (!nextItem) {
+      setCurrentItem(null);
+      return;
+    }
+
+    playingRef.current = true;
+    startedRef.current = false;
+    setIsPlaying(true);
+    setCurrentItem(nextItem);
+
+    const minMs = 1200;
+    const baseMs = 8500;
+    const byTextMs = Math.min((nextItem.text || "").length * 65, 11000);
+    const maxMs = baseMs + byTextMs;
+    minEndAtRef.current = Date.now() + minMs;
+
+    if (itemTimeoutRef.current) clearTimeout(itemTimeoutRef.current);
+    itemTimeoutRef.current = setTimeout(() => {
+      finalizeCurrent("timeout");
+      playNext();
+    }, maxMs);
+
+    try {
+      playerRef.current.translate(nextItem.text);
+    } catch (error) {
+      console.error("[VLibras] queue translate error:", error);
+      finalizeCurrent("error");
+      playNext();
+    }
+  }, [applySpeed, finalizeCurrent]);
+
+  useEffect(() => {
+    if (!visible || playerRef.current || !containerRef.current) return;
+    setStatus("loading");
+    statusRef.current = "loading";
+
+    const buildPlayer = () => {
+      try {
+        if (!window.VLibras?.Player) {
+          statusRef.current = "error";
+          setStatus("error");
+          return;
+        }
+
+        const player = new window.VLibras.Player({
+          targetPath: VLIBRAS_TARGET_PATH,
+          onLoad: () => {
+            clearTimeout(timeoutRef.current);
+            statusRef.current = "ready";
+            setStatus("ready");
+            applySpeed();
+            playNext();
+          },
+        });
+
+        player.on("error", () => {
+          statusRef.current = "error";
+          setStatus("error");
+        });
+        player.on("gloss:start", () => {
+          startedRef.current = true;
+        });
+        player.on("gloss:end", () => {
+          // Ignora término espúrio antes de realmente iniciar a glosa atual.
+          if (!startedRef.current) return;
+          finalizeCurrent("event");
+          playNext();
+        });
+
+        player.load(containerRef.current);
+        playerRef.current = player;
+
+        timeoutRef.current = setTimeout(() => {
+          if (statusRef.current === "ready") return;
+          statusRef.current = "timeout";
+          setStatus("timeout");
+        }, 90000);
+      } catch (error) {
+        console.error("[VLibras] player init error:", error);
+        statusRef.current = "error";
+        setStatus("error");
+      }
+    };
+
+    const existingScript = document.getElementById("vlibras-player-sdk");
+    if (existingScript) {
+      if (window.VLibras?.Player) buildPlayer();
+      else existingScript.addEventListener("load", buildPlayer, { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = "vlibras-player-sdk";
+    script.src = VLIBRAS_PLAYER_SCRIPT;
+    script.onload = buildPlayer;
+    script.onerror = () => setStatus("error");
+    document.body.appendChild(script);
+
+    return () => {
+      clearTimeout(timeoutRef.current);
+      clearTimeout(itemTimeoutRef.current);
+    };
+  }, [applySpeed, finalizeCurrent, playNext, visible]);
+
+  useEffect(() => {
+    if (!transcriptions?.length) return;
+
+    let added = 0;
+    for (const item of transcriptions) {
+      const key = item.serverId || item.id;
+      if (!key || seenIdsRef.current.has(key)) continue;
+      seenIdsRef.current.add(key);
+      queueRef.current.push({
+        id: key,
+        name: item.name || "Usuário",
+        text: item.text || "",
+      });
+      added += 1;
+    }
+
+    if (added > 0) {
+      setQueueSize(queueRef.current.length);
+      applySpeed();
+      playNext();
+    }
+  }, [applySpeed, playNext, transcriptions]);
+
+  if (!visible) return null;
+
+  const overlay = {
+    loading: { msg: "Carregando VLibras...", cls: "text-zinc-500" },
+    timeout: { msg: "VLibras não carregou — recarregue", cls: "text-red-400" },
+    error:   { msg: "Erro ao carregar VLibras", cls: "text-red-400" },
+    ready: null,
+  }[status];
+
+  return (
+    <div className="flex flex-col border-t border-zinc-800 bg-[#0b0b18]">
+      <div ref={containerRef} className="relative w-full overflow-hidden" style={{ height: 180 }}>
+        {overlay && (
+          <div className={`absolute inset-0 z-10 flex items-center justify-center px-4 text-center text-xs ${overlay.cls}`}>
+            {overlay.msg}
+          </div>
+        )}
+        {status === "ready" && (isPlaying || queueSize > 0) && (
+          <div className="absolute left-2 top-2 z-10 rounded-md bg-black/50 px-2 py-1 text-[10px] text-zinc-200">
+            {isPlaying ? "Sinalizando" : "Na fila"} · fila {queueSize} · {queueSize > 0 ? `${VLIBRAS_FAST_SPEED.toFixed(2)}x` : `${VLIBRAS_BASE_SPEED.toFixed(1)}x`}
+          </div>
+        )}
+      </div>
+      {currentItem && (
+        <div className="border-t border-zinc-800/60 px-3 py-1.5">
+          <span className="text-[10px] font-bold text-indigo-300">🤟 {currentItem.name}</span>
+          <p className="mt-0.5 line-clamp-2 text-[11px] text-zinc-400">{currentItem.text}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ================= Chat Unificado com histórico ================= */
 function UnifiedChat({ roomCode, userName, onClose, isMobile, onUnread }) {
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [showAvatar, setShowAvatar] = useState(true);
   const bottomRef = useRef(null);
   const { localParticipant } = useLocalParticipant();
   const displayName = userName || localParticipant?.name || "Você";
   const isFirstLoad = useRef(true);
+
+  const liveTranscriptions = messages.filter((message) => message.type === "transcription" && !message.isHistory);
 
   const syncHistory = useCallback(async (isInitialLoad = false) => {
     try {
@@ -473,7 +690,16 @@ function UnifiedChat({ roomCode, userName, onClose, isMobile, onUnread }) {
     <div className={`flex h-full flex-col bg-[#111] ${isMobile ? "" : "border-l border-zinc-800"}`}>
       <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-3 text-[13px] font-semibold text-white">
         <span>💬 Chat & Transcrições</span>
-        {isMobile && <button onClick={onClose} className="text-lg text-zinc-400">✕</button>}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowAvatar(v => !v)}
+            title="Avatar Libras"
+            className={`rounded-md px-2 py-0.5 text-[13px] transition-colors ${showAvatar ? "bg-indigo-700 text-white" : "bg-zinc-800 text-zinc-500"}`}
+          >
+            🤟
+          </button>
+          {isMobile && <button onClick={onClose} className="text-lg text-zinc-400">✕</button>}
+        </div>
       </div>
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-3 pt-3">
         {loadingHistory ? (
@@ -527,6 +753,7 @@ function UnifiedChat({ roomCode, userName, onClose, isMobile, onUnread }) {
         )}
         <div ref={bottomRef} />
       </div>
+      <VLibrasAvatar transcriptions={liveTranscriptions} visible={showAvatar} />
       <div className="flex shrink-0 gap-2 border-t border-zinc-800 px-3 py-2.5">
         <input
           value={inputText}
